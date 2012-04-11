@@ -65,7 +65,7 @@ static struct t_layout {
 	int chunk_size;
 	int spare_size;
 } possible_layouts[] =
-	{ { 2048, 64 }, { 4096, 128 }, { 8192, 256 }, { 16384, 512 } };
+	{ { 2048, 64 }, { 4096, 128 }, { 8192, 256 }, { 8192, 448 }, { 16384, 512 } };
 
 int max_layout = sizeof(possible_layouts) / sizeof(struct t_layout);
 
@@ -579,7 +579,8 @@ Usage: unyaffs [-l <layout>] [-t] [-v] [-V] <image_file_name> [<base dir>]\n\
         layout=1:  2K chunk,  64 byte spare size\n\
         layout=2:  4K chunk, 128 byte spare size\n\
         layout=3:  8K chunk, 256 byte spare size\n\
-        layout=4: 16K chunk, 512 byte spare size\n\
+        layout=4:  8K chunk, 448 byte spare size\n\
+        layout=5: 16K chunk, 512 byte spare size\n\
     -t               list image contents\n\
     -v               verbose output\n\
     -V               print version\n\
