@@ -570,17 +570,24 @@ void detect_chunk_size(void) {
 }
 
 void usage(void) {
+	int i;
+
 	fprintf(stderr, "\
 unyaffs - extract files from a YAFFS2 file system image.\n\
 \n\
 Usage: unyaffs [-l <layout>] [-t] [-v] [-V] <image_file_name> [<base dir>]\n\
     -l <layout>      set flash memory layout\n\
         layout=0: detect chunk and spare size (default)\n\
-        layout=1:  2K chunk,  64 byte spare size\n\
-        layout=2:  4K chunk, 128 byte spare size\n\
-        layout=3:  8K chunk, 256 byte spare size\n\
-        layout=4:  8K chunk, 448 byte spare size\n\
-        layout=5: 16K chunk, 512 byte spare size\n\
+");
+	for (i = 0; i < max_layout; i++) {
+		fprintf(stderr,
+		        "        layout=%d: %2dK chunk, %3d byte spare size\n",
+		        i+1,
+		        possible_layouts[i].chunk_size / 1024,
+		        possible_layouts[i].spare_size);
+	}
+
+	fprintf(stderr, "\
     -t               list image contents\n\
     -v               verbose output\n\
     -V               print version\n\
