@@ -50,7 +50,8 @@ Usage
           layout=1:  2K chunk,  64 byte spare size
           layout=2:  4K chunk, 128 byte spare size
           layout=3:  8K chunk, 256 byte spare size
-          layout=4: 16K chunk, 512 byte spare size
+          layout=4:  8K chunk, 448 byte spare size
+          layout=5: 16K chunk, 512 byte spare size
       -t               list image contents
       -v               verbose output
       -V               print version
