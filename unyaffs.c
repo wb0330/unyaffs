@@ -73,11 +73,12 @@ static struct t_layout {
 int max_layout = sizeof(possible_layouts) / sizeof(struct t_layout);
 
 unsigned char data[MAX_CHUNK_SIZE + MAX_SPARE_SIZE];
-unsigned char buffer[2*(MAX_CHUNK_SIZE + MAX_SPARE_SIZE)];
+unsigned char buffer[4*(MAX_CHUNK_SIZE + MAX_SPARE_SIZE)];
 unsigned char *chunk_data = data;
 unsigned char *spare_data = NULL;
 int chunk_size = 2048;
 int spare_size = 64;
+int spare_off  = 0;
 int buf_len = 0;
 int buf_idx = 0;
 int chunk_no   = 0;
@@ -264,10 +265,10 @@ static object *add_object(yaffs_ObjectHeader *oh, yaffs_PackedTags2 *pt) {
 		parent = get_object(oh->parentObjectId);
 		if (parent == NULL)
 			prt_err(1, 0, "Invalid parentObjectId %u in object %u (%s)",
-	        		oh->parentObjectId, pt->t.objectId, oh->name);
+			        oh->parentObjectId, pt->t.objectId, oh->name);
 		if (parent->type != YAFFS_OBJECT_TYPE_DIRECTORY)
 			prt_err(1, ENOTDIR, "File %s can't be created in %s",
-	        		oh->name, parent->path_name);
+			        oh->name, parent->path_name);
 		obj = malloc(offsetof(object, path_name) +
 		             strlen(parent->path_name) + strlen(oh->name) + 2);
 		if (obj == NULL)
@@ -507,7 +508,7 @@ int read_chunk(void) {
 	chunk_no++;
 	len = chunk_size + spare_size;
 	offset = 0;
-	memset(chunk_data, 0xff, sizeof(chunk_data));
+	memset(data, 0xff, len);
 
 	if (buf_len > buf_idx) {		/* copy from buffer */
 		s = buf_len - buf_idx;
@@ -526,50 +527,69 @@ int read_chunk(void) {
 	if (offset != 0 && offset != len)	/* partial chunk */
 		prt_err(1, 0, "Broken image file");
 
+	if (offset == len && spare_off != 0) {	/* bad block info */
+		memmove(data+chunk_size, data+chunk_size+spare_off,
+		        spare_size-spare_off);
+		memset(data+len-spare_off, 0xff, spare_off);
+	}
+
 	return offset != 0;
 }
 
 void detect_chunk_size(void) {
-	yaffs_ObjectHeader *oh;
-	yaffs_PackedTags2  *pt, *pt2;
-	int      i;
+	yaffs_ObjectHeader oh;
+	yaffs_PackedTags2  pt;
+	int detect;
+	int chunk, spare;
+	int i, l, off;
 
 	memset(buffer, 0xff, sizeof(buffer));
 	buf_len = xread(img_file, buffer, sizeof(buffer));
 	if (buf_len < 0)
 		prt_err(1, errno, "Read image file");
 
-	oh = (yaffs_ObjectHeader *)buffer;
-	if (oh->parentObjectId != YAFFS_OBJECTID_ROOT ||
-	    (oh->type          != YAFFS_OBJECT_TYPE_FILE &&
-	     oh->type          != YAFFS_OBJECT_TYPE_DIRECTORY &&
-	     oh->type          != YAFFS_OBJECT_TYPE_SYMLINK &&
-	     oh->type          != YAFFS_OBJECT_TYPE_HARDLINK &&
-	     oh->type          != YAFFS_OBJECT_TYPE_SPECIAL))
-		prt_err(1, 0, "Not a yaffs2 image");
-
-	for (i = 0; i < max_layout; i++) {
- 		pt  = (yaffs_PackedTags2 *)
-		      (buffer + possible_layouts[i].chunk_size);
-		pt2 = (yaffs_PackedTags2 *)
-		      (buffer + 2 * possible_layouts[i].chunk_size +
-		       possible_layouts[i].spare_size);
-
-		if (pt->t.byteCount == 0xffff && pt->t.chunkId == 0 &&
-		    ((pt2->t.byteCount == 0xffff && pt2->t.chunkId == 0) ||
-		     (pt2->t.objectId == pt->t.objectId && pt2->t.chunkId == 1)))
-			break;
+	detect = 0; off = 0;
+	for (l = 0; l < max_layout; l++) {
+		chunk = possible_layouts[l].chunk_size;
+		spare = possible_layouts[l].spare_size;
+		for (off = 0; off <= 2; off += 2) {
+			for (i = 0, detect = 1; i < 4 && detect; i++) {
+				memcpy(&oh, buffer + i * (chunk + spare),
+				       sizeof(oh));
+				memcpy(&pt, buffer + i * (chunk + spare) +
+				       chunk + off, sizeof(pt));
+				detect =
+				  (pt.t.chunkId > 0 &&
+				   pt.t.chunkId <= 10 &&
+				   pt.t.objectId >= 0x100 &&
+				   pt.t.objectId <= (0x100+10) &&
+				   pt.t.byteCount <= chunk) ||
+				  (pt.t.chunkId == 0 &&
+				   (pt.t.objectId == YAFFS_OBJECTID_ROOT ||
+				    (pt.t.objectId >= 0x100 &&
+				     pt.t.objectId <= (0x100+10) )) &&
+				   pt.t.byteCount == 0xffff &&
+				   (oh.type == YAFFS_OBJECT_TYPE_FILE ||
+				    oh.type == YAFFS_OBJECT_TYPE_DIRECTORY ||
+				    oh.type == YAFFS_OBJECT_TYPE_SYMLINK ||
+				    oh.type == YAFFS_OBJECT_TYPE_HARDLINK ||
+				    oh.type == YAFFS_OBJECT_TYPE_SPECIAL));
+			}
+			if (detect) break;
+		}
+		if (detect) break;
 	}
 
-	if (i >= max_layout)
-		prt_err(1, 0, "Can't determine chunk size");
+	if (!detect)
+		prt_err(1, 0, "Can't determine chunk size, perhaps not a yaffs2 image");
 
-	chunk_size = possible_layouts[i].chunk_size;
-	spare_size = possible_layouts[i].spare_size;
+	chunk_size = possible_layouts[l].chunk_size;
+	spare_size = possible_layouts[l].spare_size;
+	spare_off  = off;
 	if (opt_verbose)
 		fprintf(stderr,
-		        "Header check OK, chunk size = %dK, spare size = %d.\n",
-		        chunk_size/1024, spare_size);
+		        "Header check OK, chunk size = %dK, spare size = %d, %sbad block info.\n",
+		        chunk_size/1024, spare_size, spare_off ? "" : "no ");
 }
 
 void usage(void) {
@@ -579,6 +599,7 @@ unyaffs - extract files from a YAFFS2 file system image.\n\
 Usage: unyaffs [options] <image_file_name> [<extract_directory>]\n\
 \n\
 Options:\n\
+    -b               spare contains bad block information\n\
     -c <chunk size>  set chunk size in KByte (default: autodetect, max: %d)\n\
     -s <spare size>  set spare size in Byte  (default: autodetect, max: %d)\n\
     -t               list image contents\n\
@@ -592,16 +613,21 @@ int main(int argc, char **argv) {
 	int ch;
 	char *ep;
 
+	int opt_bad;
 	int opt_chunk;
 	int opt_spare;
 
 	/* handle command line options */
+	opt_bad = 0;
 	opt_chunk = 0;
 	opt_spare = 0;
 	opt_list = 0;
 	opt_verbose = 0;
-	while ((ch = getopt(argc, argv, "c:s:tvVh?")) > 0) {
+	while ((ch = getopt(argc, argv, "bc:s:tvVh?")) > 0) {
 		switch (ch) {
+			case 'b':
+				opt_bad = 1;
+				break;
 			case 'c':
 				opt_chunk = strtol(optarg, &ep, 0);
 				if (*ep != '\0' ||
@@ -615,7 +641,7 @@ int main(int argc, char **argv) {
 				    opt_spare < 0 ||
 				    opt_chunk > MAX_SPARE_SIZE)
 					usage();
- 				break;
+				break;
 			case 't':
 				opt_list = 1;
 				break;
@@ -651,6 +677,7 @@ int main(int argc, char **argv) {
 	} else {
 		chunk_size = opt_chunk * 1024;
 		spare_size = opt_spare;
+		spare_off  = opt_bad ? 2 : 0;
 	}
 	spare_data = data + chunk_size;
 

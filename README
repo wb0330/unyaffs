@@ -47,6 +47,7 @@ Usage
   Usage: unyaffs [options] <image_file_name> [<extract_directory>]
 
   Options:
+      -b               spare contains bad block information
       -c <chunk size>  set chunk size in KByte (default: autodetect, max: 16)
       -s <spare size>  set spare size in Byte  (default: autodetect, max: 512)
       -t               list image contents
@@ -55,7 +56,7 @@ Usage
 
   In most cases the flash memory layout is detected automatically.
   If the detection doesn't work properly, the layout can be set with
-  options -c and -s.
+  options -c and -s. If spare contains bad block info, set option -b.
 
   Option -t lists all the file names in the image without extracting them.
   Option -v generates a 'ls -l' like listing of the extracted files.
