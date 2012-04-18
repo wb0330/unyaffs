@@ -391,6 +391,38 @@ static void prt_node(char *name, yaffs_ObjectHeader *oh) {
 
 int read_chunk(void);
 
+static struct {
+	unsigned objectId;
+	int      chunk_no;
+	unsigned char data[MAX_CHUNK_SIZE + MAX_SPARE_SIZE];
+} saved_chunk;
+
+int next_data_chunk(void) {
+	yaffs_PackedTags2 *pt;
+	unsigned next_objectId;
+	unsigned next_chunkId;
+	int ret = 0;
+
+	pt = (yaffs_PackedTags2 *)spare_data;
+	next_objectId = pt->t.objectId;
+	next_chunkId  = pt->t.chunkId + 1;
+
+	if (saved_chunk.objectId == next_objectId &&	/* use saved chunk ? */
+	    next_chunkId == 1) {
+		memcpy(chunk_data, saved_chunk.data, chunk_size);
+		memcpy(spare_data, saved_chunk.data+chunk_size, spare_size);
+		saved_chunk.objectId = 0;
+		ret = 1;
+	} else {
+		if (read_chunk() &&		/* valid next chunk ? */
+		    pt->t.objectId == next_objectId &&
+		    pt->t.chunkId == next_chunkId) {
+			ret = 1;
+		}
+	}
+	return ret;
+}
+
 void process_chunk(void) {
 	yaffs_ObjectHeader oh;
 	yaffs_PackedTags2 *pt;
@@ -400,9 +432,25 @@ void process_chunk(void) {
 	oh = *(yaffs_ObjectHeader *)chunk_data;
 	pt = (yaffs_PackedTags2 *)spare_data;
 
-	if (pt->t.byteCount == 0xffffffff)	/* empty object */
+	if (pt->t.sequenceNumber == 0xffffffff)	/* empty object */
 		return;
-	else if (pt->t.byteCount != 0xffff) {	/* not a new object */
+
+	if (saved_chunk.objectId != 0 &&	/* saved chunk is not part of object */
+	    saved_chunk.objectId != pt->t.objectId) {
+		prt_err(0, 0, "Warning: Invalid header at chunk #%d, skipping...",
+		        saved_chunk.chunk_no);
+		if (++warn_count >= MAX_WARN)
+			prt_err(1, 0, "Giving up");
+		saved_chunk.objectId = 0;
+	}
+
+	if (pt->t.chunkId == 1) {		/* save chunk #1 */
+		saved_chunk.objectId = pt->t.objectId;
+		saved_chunk.chunk_no = chunk_no;
+		memcpy(saved_chunk.data, chunk_data, chunk_size);
+		memcpy(saved_chunk.data+chunk_size, spare_data, spare_size);
+		return;
+	} else if (pt->t.chunkId != 0) {	/* not a new object */
 		prt_err(0, 0, "Warning: Invalid header at chunk #%d, skipping...",
 		        chunk_no);
 		if (++warn_count >= MAX_WARN)
@@ -421,7 +469,7 @@ void process_chunk(void) {
 		if (oh.type == YAFFS_OBJECT_TYPE_FILE) {
 			remain = oh.fileSize;	/* skip over data chunks */
 			while(remain > 0) {
-				if (!read_chunk())
+				if (!next_data_chunk())
 					prt_err(1, 0, "Broken image file");
 				remain -= pt->t.byteCount;
 			}
@@ -436,7 +484,7 @@ void process_chunk(void) {
 			if (out_file < 0)
 				prt_err(1, errno, "Can't create file %s", obj->path_name);
 			while(remain > 0) {
-				if (!read_chunk())
+				if (!next_data_chunk())
 					prt_err(1, 0, "Broken image file");
 				s = (remain < pt->t.byteCount) ? remain : pt->t.byteCount;
 				if (xwrite(out_file, chunk_data, s) < 0)
@@ -691,6 +739,7 @@ int main(int argc, char **argv) {
 	umask(0);
 
 	init_obj_list();
+	saved_chunk.objectId = 0;
 	while (read_chunk()) {
 		process_chunk();
 	}
