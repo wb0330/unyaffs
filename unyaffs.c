@@ -67,7 +67,8 @@ static struct t_layout {
 	int chunk_size;
 	int spare_size;
 } possible_layouts[] =
-	{ { 2048, 64 }, { 4096, 128 }, { 8192, 256 }, { 8192, 448 }, { 16384, 512 } };
+	{ { 2048, 64 }, { 4096, 128 }, { 8192, 256 }, { 8192, 368 },
+	  { 8192, 448 }, { 16384, 512 } };
 
 int max_layout = sizeof(possible_layouts) / sizeof(struct t_layout);
 
@@ -567,51 +568,54 @@ void detect_chunk_size(void) {
 	spare_size = possible_layouts[i].spare_size;
 	if (opt_verbose)
 		fprintf(stderr,
-		        "Header check OK, chunk size = %d, spare size = %d.\n",
-		        chunk_size, spare_size);
+		        "Header check OK, chunk size = %dK, spare size = %d.\n",
+		        chunk_size/1024, spare_size);
 }
 
 void usage(void) {
-	int i;
-
 	fprintf(stderr, "\
 unyaffs - extract files from a YAFFS2 file system image.\n\
 \n\
-Usage: unyaffs [-l <layout>] [-t] [-v] [-V] <image_file_name> [<base dir>]\n\
-    -l <layout>      set flash memory layout\n\
-        layout=0: detect chunk and spare size (default)\n\
-");
-	for (i = 0; i < max_layout; i++) {
-		fprintf(stderr,
-		        "        layout=%d: %2dK chunk, %3d byte spare size\n",
-		        i+1,
-		        possible_layouts[i].chunk_size / 1024,
-		        possible_layouts[i].spare_size);
-	}
-
-	fprintf(stderr, "\
+Usage: unyaffs [options] <image_file_name> [<extract_directory>]\n\
+\n\
+Options:\n\
+    -c <chunk size>  set chunk size in KByte (default: autodetect, max: %d)\n\
+    -s <spare size>  set spare size in Byte  (default: autodetect, max: %d)\n\
     -t               list image contents\n\
     -v               verbose output\n\
     -V               print version\n\
-");
+", MAX_CHUNK_SIZE / 1024, MAX_SPARE_SIZE);
 	exit(1);
 }
 
 int main(int argc, char **argv) {
 	int ch;
-	int layout = 0;
+	char *ep;
+
+	int opt_chunk;
+	int opt_spare;
 
 	/* handle command line options */
+	opt_chunk = 0;
+	opt_spare = 0;
 	opt_list = 0;
 	opt_verbose = 0;
-	while ((ch = getopt(argc, argv, "l:tvVh?")) > 0) {
+	while ((ch = getopt(argc, argv, "c:s:tvVh?")) > 0) {
 		switch (ch) {
-			case 'l':
-				if (optarg[0] < '0' ||
-				    optarg[0] > '0' + max_layout ||
-				    optarg[1] != '\0') usage();
-				layout = optarg[0] - '0';
+			case 'c':
+				opt_chunk = strtol(optarg, &ep, 0);
+				if (*ep != '\0' ||
+				    opt_chunk < 0 ||
+				    opt_chunk > (MAX_CHUNK_SIZE / 1024) )
+					usage();
 				break;
+			case 's':
+				opt_spare = strtol(optarg, &ep, 0);
+				if (*ep != '\0' ||
+				    opt_spare < 0 ||
+				    opt_chunk > MAX_SPARE_SIZE)
+					usage();
+ 				break;
 			case 't':
 				opt_list = 1;
 				break;
@@ -642,11 +646,11 @@ int main(int argc, char **argv) {
 			prt_err(1, errno, "Open image file failed");
 	}
 
-	if (layout == 0) {
+	if (opt_chunk == 0 || opt_spare == 0) {
 		detect_chunk_size();
 	} else {
-		chunk_size = possible_layouts[layout-1].chunk_size;
-		spare_size = possible_layouts[layout-1].spare_size;
+		chunk_size = opt_chunk * 1024;
+		spare_size = opt_spare;
 	}
 	spare_data = data + chunk_size;
 
