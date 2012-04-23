@@ -26,9 +26,14 @@
  *   Optional base dir for file extraction
  * V0.9.1  2012-04-12
  *   Additional flash layout: 8k chunk size, 448 byte spare
+ * V0.9.2  2012-04-18
+ *   Additional flash layout: 8k chunk size, 368 byte spare
+ *   New options -c and -s to set chunk and spare size, obsoletes option -l
+ *   Add support for bad block information in spare header.
+ *   Allow first data chunk to be stored in image before file header.
  */
 
-#define VERSION		"0.9.1"
+#define VERSION		"0.9.2"
 
 /* check if lutimes is available */
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || (defined(__APPLE__) && defined(__MACH__))
