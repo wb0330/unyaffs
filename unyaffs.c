@@ -88,6 +88,7 @@ int buf_len = 0;
 int buf_idx = 0;
 int chunk_no   = 0;
 int warn_count = 0;
+int warn_chown = 0;
 int img_file;
 int opt_list;
 int opt_verbose;
@@ -207,6 +208,18 @@ static int mkdirpath(const char *name) {
 		ret = -1; errno = ENOTDIR;
 	}
 	return ret;
+}
+
+/*
+ * save_lchown - call lchown and check result
+ */
+static void safe_lchown(const char *path, uid_t owner, gid_t group) {
+	if (lchown(path, owner, group) < 0) {
+		if (errno == EPERM || errno == EINVAL)
+			warn_chown = 1;
+		else
+			prt_err(1, errno, "Can't chown %s", path);
+	}
 }
 
 static void init_obj_list(void) {
@@ -497,7 +510,7 @@ void process_chunk(void) {
 				remain -= s;
 			}
 			close(out_file);
-			lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
+			safe_lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
 			if ((oh.yst_mode & EXTRA_PERMS) != 0 &&
 			    chmod(obj->path_name, oh.yst_mode) < 0)
 				prt_err(0, errno, "Warning: Can't chmod %s", obj->path_name);
@@ -505,13 +518,13 @@ void process_chunk(void) {
 		case YAFFS_OBJECT_TYPE_SYMLINK:
 			if (symlink(oh.alias, obj->path_name) < 0)
 				prt_err(1, errno, "Can't create symlink %s", obj->path_name);
-			lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
+			safe_lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
 			break;
 		case YAFFS_OBJECT_TYPE_DIRECTORY:
 			if (pt->t.objectId != YAFFS_OBJECTID_ROOT &&
 			    mkdir(obj->path_name, oh.yst_mode & STD_PERMS) < 0)
 					prt_err(1, errno, "Can't create directory %s", obj->path_name);
-			lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
+			safe_lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
 			if ((pt->t.objectId == YAFFS_OBJECTID_ROOT ||
 			     (oh.yst_mode & EXTRA_PERMS) != 0) &&
 			    chmod(obj->path_name, oh.yst_mode) < 0)
@@ -531,8 +544,8 @@ void process_chunk(void) {
 					prt_err(0, errno, "Warning: Can't create device %s", obj->path_name);
 				else
 					prt_err(1, errno, "Can't create device %s", obj->path_name);
-			}
-			lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
+			} else
+				safe_lchown(obj->path_name, oh.yst_uid, oh.yst_gid);
 			break;
 		case YAFFS_OBJECT_TYPE_UNKNOWN:
 			break;
@@ -750,5 +763,13 @@ int main(int argc, char **argv) {
 	}
 	set_dirs_utime();
 	close(img_file);
+
+	if (warn_chown)
+#ifdef __CYGWIN__
+		prt_err(0, 0, "Warning: Can't restore owner/group attribute (limitation of Cygwin/Windows)");
+#else
+		prt_err(0, 0, "Warning: Can't restore owner/group attribute, run unyaffs as root");
+#endif
+
 	return 0;
 }
