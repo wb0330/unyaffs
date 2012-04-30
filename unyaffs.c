@@ -144,7 +144,7 @@ static void prt_err(int status, int errnum, const char *format, ...) {
 }
 
 /* read function, which handles partial and interrupted reads */
-ssize_t xread(int fd, void *buf, size_t len) {
+ssize_t safe_read(int fd, void *buf, size_t len) {
 	char *ptr = buf;
 	ssize_t offset, ret;
 
@@ -163,7 +163,7 @@ ssize_t xread(int fd, void *buf, size_t len) {
 }
 
 /* write function, which handles partial and interrupted writes */
-ssize_t xwrite(int fd, void *buf, size_t len) {
+ssize_t safe_write(int fd, void *buf, size_t len) {
 	char *ptr = buf;
 	ssize_t offset, ret;
 
@@ -184,30 +184,27 @@ ssize_t xwrite(int fd, void *buf, size_t len) {
 /*
  * mkdirpath - creates directories including intermediate dirs
  */
-static int mkdirpath(const char *name) {
+static int mkdirpath(const char *name, mode_t mode) {
 	struct stat st;
 	char *cp;
 	char *buf;
-	int ret;
 
-	ret = 0;
-	if ((buf = malloc(strlen(name)+2)) == NULL)
+	if ((buf = malloc(strlen(name)+1)) == NULL)
 		{ errno = ENOMEM; return -1; }
-	strcpy(buf, name); strcat(buf, "/");
-	for (cp = buf; *cp == '/'; cp++);
+	strcpy(buf, name);
+	cp = buf;
 	while ((cp = strchr(cp, '/')) != NULL) {
 		*cp = '\0';
-		if (mkdir(buf, STD_PERMS) < 0 && errno != EEXIST)
-			{ ret = -1; break; }
+		mkdir(buf, 0755);
 		*cp++ = '/';
 	}
 	free(buf);
 
-	if (ret >= 0 &&
-	    (ret = stat(name, &st)) >= 0 && !S_ISDIR(st.st_mode)) {
-		ret = -1; errno = ENOTDIR;
-	}
-	return ret;
+	if (mkdir(name, mode) < 0 &&
+	    (stat(name, &st) < 0 || !S_ISDIR(st.st_mode)))
+		return -1;
+
+	return 0;
 }
 
 /*
@@ -505,7 +502,7 @@ void process_chunk(void) {
 				if (!next_data_chunk())
 					prt_err(1, 0, "Broken image file");
 				s = (remain < pt->t.byteCount) ? remain : pt->t.byteCount;
-				if (xwrite(out_file, chunk_data, s) < 0)
+				if (safe_write(out_file, chunk_data, s) < 0)
 					prt_err(1, errno, "Can't write to %s", obj->path_name);
 				remain -= s;
 			}
@@ -584,7 +581,7 @@ int read_chunk(void) {
 	}
 
 	if (offset < len) {			/* read from file */
-		s = xread(img_file, data+offset, len-offset);
+		s = safe_read(img_file, data+offset, len-offset);
 		if (s < 0)
 			prt_err(1, errno, "Read image file");
 		offset += s;
@@ -610,7 +607,7 @@ void detect_chunk_size(void) {
 	int i, l, off;
 
 	memset(buffer, 0xff, sizeof(buffer));
-	buf_len = xread(img_file, buffer, sizeof(buffer));
+	buf_len = safe_read(img_file, buffer, sizeof(buffer));
 	if (buf_len < 0)
 		prt_err(1, errno, "Read image file");
 
@@ -748,7 +745,7 @@ int main(int argc, char **argv) {
 	spare_data = data + chunk_size;
 
 	if ((argc - optind) == 2 && !opt_list) {
-		if (mkdirpath(argv[optind+1]) < 0)
+		if (mkdirpath(argv[optind+1], 0755) < 0)
 			prt_err(1, errno, "Can't mkdir %s", argv[optind+1]);
 		if (chdir(argv[optind+1]) < 0)
 			prt_err(1, errno, "Can't chdir to %s", argv[optind+1]);
