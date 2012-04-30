@@ -31,9 +31,12 @@
  *   New options -c and -s to set chunk and spare size, obsoletes option -l
  *   Add support for bad block information in spare header.
  *   Allow first data chunk to be stored in image before file header.
+ * V0.9.3  2012-04-30
+ *   check result of lchown system call
+ *   Code cleanup
  */
 
-#define VERSION		"0.9.2"
+#define VERSION		"0.9.3"
 
 /* check if lutimes is available */
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || (defined(__APPLE__) && defined(__MACH__))
@@ -657,7 +660,7 @@ void detect_chunk_size(void) {
 
 void usage(void) {
 	fprintf(stderr, "\
-unyaffs - extract files from a YAFFS2 file system image.\n\
+unyaffs V%s - extract files from a YAFFS2 file system image.\n\
 \n\
 Usage: unyaffs [options] <image_file_name> [<extract_directory>]\n\
 \n\
@@ -668,7 +671,7 @@ Options:\n\
     -t               list image contents\n\
     -v               verbose output\n\
     -V               print version\n\
-", MAX_CHUNK_SIZE / 1024, MAX_SPARE_SIZE);
+", VERSION, MAX_CHUNK_SIZE / 1024, MAX_SPARE_SIZE);
 	exit(1);
 }
 
