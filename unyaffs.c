@@ -34,9 +34,12 @@
  * V0.9.3  2012-04-30
  *   check result of lchown system call
  *   Code cleanup
+ * V0.9.4  2012-05-01
+ *   No predefined flash layouts, detect all possible layouts
+ *   Option -d shows detected flash layout, no extraction
  */
 
-#define VERSION		"0.9.3"
+#define VERSION		"0.9.4"
 
 /* check if lutimes is available */
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || (defined(__APPLE__) && defined(__MACH__))
@@ -62,7 +65,9 @@
 
 #include "unyaffs.h"
 
+#define MIN_CHUNK_SIZE		 2048
 #define MAX_CHUNK_SIZE		16384
+#define MIN_SPARE_SIZE		   64
 #define MAX_SPARE_SIZE		  512
 #define HASH_SIZE		 7001
 #define MAX_WARN		   20
@@ -71,21 +76,12 @@
 #define STD_PERMS		(S_IRWXU|S_IRWXG|S_IRWXO)
 #define EXTRA_PERMS		(S_ISUID|S_ISGID|S_ISVTX)
 
-static struct t_layout {
-	int chunk_size;
-	int spare_size;
-} possible_layouts[] =
-	{ { 2048, 64 }, { 4096, 128 }, { 8192, 256 }, { 8192, 368 },
-	  { 8192, 448 }, { 16384, 512 } };
-
-int max_layout = sizeof(possible_layouts) / sizeof(struct t_layout);
-
 unsigned char data[MAX_CHUNK_SIZE + MAX_SPARE_SIZE];
 unsigned char buffer[4*(MAX_CHUNK_SIZE + MAX_SPARE_SIZE)];
 unsigned char *chunk_data = data;
 unsigned char *spare_data = NULL;
-int chunk_size = 2048;
-int spare_size = 64;
+int chunk_size = MIN_CHUNK_SIZE;
+int spare_size = MIN_SPARE_SIZE;
 int spare_off  = 0;
 int buf_len = 0;
 int buf_idx = 0;
@@ -602,60 +598,75 @@ int read_chunk(void) {
 	return offset != 0;
 }
 
-void detect_chunk_size(void) {
+int check_layout(int chunk, int spare, int off) {
 	yaffs_ObjectHeader oh;
 	yaffs_PackedTags2  pt;
-	int detect;
-	int chunk, spare;
-	int i, l, off;
+	int i, detect;
+
+	for (i = 0, detect = 1; i < 4 && detect; i++) {
+		memcpy(&oh, buffer + i * (chunk+spare), sizeof(oh));
+		memcpy(&pt, buffer + i * (chunk+spare) + chunk+off, sizeof(pt));
+
+		detect =
+		  (pt.t.chunkId > 0 && pt.t.chunkId <= 10 &&
+		   pt.t.objectId >= 0x100 && pt.t.objectId <= (0x100+10) &&
+		   pt.t.byteCount <= chunk) ||
+		  (pt.t.chunkId == 0 &&
+		   (pt.t.objectId == YAFFS_OBJECTID_ROOT ||
+		    (pt.t.objectId >= 0x100 && pt.t.objectId <= (0x100+10))) &&
+		   pt.t.byteCount == 0xffff &&
+		   (oh.type == YAFFS_OBJECT_TYPE_FILE ||
+		    oh.type == YAFFS_OBJECT_TYPE_DIRECTORY ||
+		    oh.type == YAFFS_OBJECT_TYPE_SYMLINK ||
+		    oh.type == YAFFS_OBJECT_TYPE_HARDLINK ||
+		    oh.type == YAFFS_OBJECT_TYPE_SPECIAL));
+	}
+
+	return detect;
+}
+
+void detect_flash_layout(int show, int first) {
+	int cnt;
+	int chunk, spare, off;
 
 	memset(buffer, 0xff, sizeof(buffer));
 	buf_len = safe_read(img_file, buffer, sizeof(buffer));
 	if (buf_len < 0)
 		prt_err(1, errno, "Read image file");
 
-	detect = 0; off = 0;
-	for (l = 0; l < max_layout; l++) {
-		chunk = possible_layouts[l].chunk_size;
-		spare = possible_layouts[l].spare_size;
-		for (off = 0; off <= 2; off += 2) {
-			for (i = 0, detect = 1; i < 4 && detect; i++) {
-				memcpy(&oh, buffer + i * (chunk + spare),
-				       sizeof(oh));
-				memcpy(&pt, buffer + i * (chunk + spare) +
-				       chunk + off, sizeof(pt));
-				detect =
-				  (pt.t.chunkId > 0 &&
-				   pt.t.chunkId <= 10 &&
-				   pt.t.objectId >= 0x100 &&
-				   pt.t.objectId <= (0x100+10) &&
-				   pt.t.byteCount <= chunk) ||
-				  (pt.t.chunkId == 0 &&
-				   (pt.t.objectId == YAFFS_OBJECTID_ROOT ||
-				    (pt.t.objectId >= 0x100 &&
-				     pt.t.objectId <= (0x100+10) )) &&
-				   pt.t.byteCount == 0xffff &&
-				   (oh.type == YAFFS_OBJECT_TYPE_FILE ||
-				    oh.type == YAFFS_OBJECT_TYPE_DIRECTORY ||
-				    oh.type == YAFFS_OBJECT_TYPE_SYMLINK ||
-				    oh.type == YAFFS_OBJECT_TYPE_HARDLINK ||
-				    oh.type == YAFFS_OBJECT_TYPE_SPECIAL));
+	if (show)
+		printf("Detected flash layout(s):\n");
+
+	cnt = 0;
+	for (chunk = MIN_CHUNK_SIZE; chunk <= MAX_CHUNK_SIZE; chunk *= 2) {
+		for (spare = MIN_SPARE_SIZE; spare <= MAX_SPARE_SIZE; spare += 16) {
+			for (off = 0; off <= 2; off += 2) {
+				if (check_layout(chunk, spare, off)) {
+					cnt++;
+					if (show) {
+						printf("%2s -c %-2d -s %-3d : chunk size = %2dK, spare size = %3d, %sbad block info\n",
+						       off ? "-b" : "", chunk / 1024, spare,
+						       chunk / 1024, spare, off ? "" : "no ");
+					}
+					if (first) {
+						chunk_size = chunk;
+						spare_size = spare;
+						spare_off  = off;
+						return;
+					}
+				}
 			}
-			if (detect) break;
 		}
-		if (detect) break;
 	}
 
-	if (!detect)
-		prt_err(1, 0, "Can't determine chunk size, perhaps not a yaffs2 image");
-
-	chunk_size = possible_layouts[l].chunk_size;
-	spare_size = possible_layouts[l].spare_size;
-	spare_off  = off;
-	if (opt_verbose)
-		fprintf(stderr,
-		        "Header check OK, chunk size = %dK, spare size = %d, %sbad block info.\n",
-		        chunk_size/1024, spare_size, spare_off ? "" : "no ");
+	if (cnt == 0) {
+		if (show) {
+			printf("-- none --\n");
+			exit(1);
+		} else {
+			prt_err(1, 0, "Can't determine flash layout, perhaps not a yaffs2 image");
+		}
+	}
 }
 
 void usage(void) {
@@ -665,6 +676,7 @@ unyaffs V%s - extract files from a YAFFS2 file system image.\n\
 Usage: unyaffs [options] <image_file_name> [<extract_directory>]\n\
 \n\
 Options:\n\
+    -d               detection of flash layout, no extraction\n\
     -b               spare contains bad block information\n\
     -c <chunk size>  set chunk size in KByte (default: autodetect, max: %d)\n\
     -s <spare size>  set spare size in Byte  (default: autodetect, max: %d)\n\
@@ -679,18 +691,23 @@ int main(int argc, char **argv) {
 	int ch;
 	char *ep;
 
+	int opt_detect;
 	int opt_bad;
 	int opt_chunk;
 	int opt_spare;
 
 	/* handle command line options */
+	opt_detect = 0;
 	opt_bad = 0;
 	opt_chunk = 0;
 	opt_spare = 0;
 	opt_list = 0;
 	opt_verbose = 0;
-	while ((ch = getopt(argc, argv, "bc:s:tvVh?")) > 0) {
+	while ((ch = getopt(argc, argv, "dbc:s:tvVh?")) > 0) {
 		switch (ch) {
+			case 'd':
+				opt_detect = 1;
+				break;
 			case 'b':
 				opt_bad = 1;
 				break;
@@ -738,8 +755,17 @@ int main(int argc, char **argv) {
 			prt_err(1, errno, "Open image file failed");
 	}
 
+	if (opt_detect) {
+		detect_flash_layout(1, 0);
+		return 0;
+	}
+
 	if (opt_chunk == 0 || opt_spare == 0) {
-		detect_chunk_size();
+		detect_flash_layout(0, 1);
+		if (opt_verbose)
+			prt_err(0, 0,
+		        	"Header check OK, chunk size = %dK, spare size = %d, %sbad block info.",
+		        	chunk_size/1024, spare_size, spare_off ? "" : "no ");
 	} else {
 		chunk_size = opt_chunk * 1024;
 		spare_size = opt_spare;
