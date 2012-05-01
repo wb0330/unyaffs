@@ -47,6 +47,7 @@ Usage
   Usage: unyaffs [options] <image_file_name> [<extract_directory>]
 
   Options:
+      -d               detection of flash layout, no extraction
       -b               spare contains bad block information
       -c <chunk size>  set chunk size in KByte (default: autodetect, max: 16)
       -s <spare size>  set spare size in Byte  (default: autodetect, max: 512)
