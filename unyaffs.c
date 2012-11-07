@@ -722,7 +722,7 @@ int main(int argc, char **argv) {
 				opt_spare = strtol(optarg, &ep, 0);
 				if (*ep != '\0' ||
 				    opt_spare < 0 ||
-				    opt_chunk > MAX_SPARE_SIZE)
+				    opt_spare > MAX_SPARE_SIZE)
 					usage();
 				break;
 			case 't':
