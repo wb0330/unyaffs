@@ -640,13 +640,19 @@ void detect_flash_layout(int show, int first) {
 	cnt = 0;
 	for (chunk = MIN_CHUNK_SIZE; chunk <= MAX_CHUNK_SIZE; chunk *= 2) {
 		for (spare = MIN_SPARE_SIZE; spare <= MAX_SPARE_SIZE; spare += 16) {
-			for (off = 0; off <= 2; off += 2) {
+			for (off = 0; off <= 4; off += 2) {
 				if (check_layout(chunk, spare, off)) {
 					cnt++;
 					if (show) {
+						char b_pram[5]="";
+						char info[9]="no ";
+						if (off > 0) {
+							sprintf(b_pram, "-b %d", off);
+							sprintf(info, "%d bytes ", off);
+						}
 						printf("%2s -c %-2d -s %-3d : chunk size = %2dK, spare size = %3d, %sbad block info\n",
-						       off ? "-b" : "", chunk / 1024, spare,
-						       chunk / 1024, spare, off ? "" : "no ");
+						       b_pram, chunk / 1024, spare,
+						       chunk / 1024, spare, info);
 					}
 					if (first) {
 						chunk_size = chunk;
@@ -677,7 +683,7 @@ Usage: unyaffs [options] <image_file_name> [<extract_directory>]\n\
 \n\
 Options:\n\
     -d               detection of flash layout, no extraction\n\
-    -b               spare contains bad block information\n\
+    -b <info size>   spare contains bad block information (set in Byte)\n\
     -c <chunk size>  set chunk size in KByte (default: autodetect, max: %d)\n\
     -s <spare size>  set spare size in Byte  (default: autodetect, max: %d)\n\
     -t               list image contents\n\
@@ -709,7 +715,10 @@ int main(int argc, char **argv) {
 				opt_detect = 1;
 				break;
 			case 'b':
-				opt_bad = 1;
+				opt_bad = strtol(optarg, &ep, 0);
+				if (*ep != '\0' ||
+				    opt_bad < 0)
+					usage();
 				break;
 			case 'c':
 				opt_chunk = strtol(optarg, &ep, 0);
@@ -722,7 +731,7 @@ int main(int argc, char **argv) {
 				opt_spare = strtol(optarg, &ep, 0);
 				if (*ep != '\0' ||
 				    opt_spare < 0 ||
-				    opt_chunk > MAX_SPARE_SIZE)
+				    opt_spare > MAX_SPARE_SIZE)
 					usage();
 				break;
 			case 't':
@@ -769,7 +778,7 @@ int main(int argc, char **argv) {
 	} else {
 		chunk_size = opt_chunk * 1024;
 		spare_size = opt_spare;
-		spare_off  = opt_bad ? 2 : 0;
+		spare_off  = opt_bad;
 	}
 	spare_data = data + chunk_size;
 

@@ -48,7 +48,7 @@ Usage
 
   Options:
       -d               detection of flash layout, no extraction
-      -b               spare contains bad block information
+      -b <info size>   spare contains bad block information (set in Byte)
       -c <chunk size>  set chunk size in KByte (default: autodetect, max: 16)
       -s <spare size>  set spare size in Byte  (default: autodetect, max: 512)
       -t               list image contents
